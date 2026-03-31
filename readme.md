@@ -6,6 +6,12 @@
 
 
 
+https://github.com/user-attachments/assets/3384201c-677e-463c-9e44-3ecb660faf3f
+
+
+
+
+
 FarmBot is an AI-powered agricultural assistant designed specifically for farmers in Kerala. It leverages state-of-the-art vision models and live weather data to provide instant diagnoses for crop diseases, delivering highly personalized and weather-aware treatment plans in Malayalam.
 
 ## ✨ Key Features
