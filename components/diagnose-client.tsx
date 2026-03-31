@@ -4,18 +4,15 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
 import LeafUploader from "@/components/leaf-uploader";
 import VoiceRecorder from "@/components/voice-recorder";
 import LocationPicker from "@/components/location-picker";
 import ResultsPanel from "@/components/results-panel";
 import type { AnalysisResult } from "@/lib/types";
-import { Loader2, Camera, Mic, Phone, Sparkles, ChevronDown, User as UserIcon } from "lucide-react";
+import { Loader2, Camera, Mic, Sparkles, User as UserIcon } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/components/auth-provider";
-import { storage } from "@/lib/firebase";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
 
 export default function DiagnoseClient() {
   const [image, setImage] = useState<File | null>(null);
@@ -43,14 +40,6 @@ export default function DiagnoseClient() {
     setResult(null);
 
     try {
-      let imageUrl = "";
-      // Upload image to Firebase Storage
-      if (user) {
-        const imageRef = ref(storage, `users/${user.uid}/${Date.now()}_leafImage.png`);
-        await uploadBytes(imageRef, image);
-        imageUrl = await getDownloadURL(imageRef);
-      }
-
       const formData = new FormData();
       formData.append("image", image);
       if (location) {
@@ -59,13 +48,22 @@ export default function DiagnoseClient() {
       }
       if (user) {
         formData.append("uid", user.uid);
-        formData.append("imageUrl", imageUrl);
       }
 
-      const res = await fetch("/api/analyze", {
-        method: "POST",
-        body: formData,
-      });
+      // 60-second timeout so the spinner never hangs forever
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 60_000);
+
+      let res: Response;
+      try {
+        res = await fetch("/api/analyze", {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        });
+      } finally {
+        clearTimeout(timer);
+      }
 
       const data = await res.json();
 

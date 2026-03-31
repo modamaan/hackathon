@@ -4,7 +4,11 @@ import { getAdminDb } from "@/lib/firebase-admin";
 import type { DiagnosisResult, WeatherData, LocationData, DiagnosisRecord } from "@/lib/types";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
+// gemini-2.0-flash is stable, fast, and supports vision + audio
 const MODEL_NAME = "gemini-2.5-flash";
+
+// Route timeout: 60 seconds
+export const maxDuration = 60;
 
 async function analyzeLeafImage(
   imageBase64: string,
@@ -38,37 +42,45 @@ If you cannot identify a disease, return:
 }
 
 async function getWeather(lat: number, lon: number): Promise<WeatherData | null> {
-  const apiKey = process.env.GOOGLE_MAPS_API_KEY;
-  if (!apiKey) return null;
-
   try {
-    const [currentRes, forecastRes] = await Promise.all([
-      fetch(
-        `https://weather.googleapis.com/v1/currentConditions:lookup?key=${apiKey}&location.latitude=${lat}&location.longitude=${lon}&unitsSystem=METRIC`
-      ),
-      fetch(
-        `https://weather.googleapis.com/v1/forecast/days:lookup?key=${apiKey}&location.latitude=${lat}&location.longitude=${lon}&days=5&unitsSystem=METRIC`
-      ),
-    ]);
+    // Open-Meteo: free, no API key, reliable
+    const url =
+      `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}` +
+      `&current=temperature_2m,relative_humidity_2m,precipitation,weather_code` +
+      `&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,weathercode,relative_humidity_2m_max` +
+      `&forecast_days=5&timezone=Asia%2FKolkata`;
 
-    const current = await currentRes.json();
-    const forecast = await forecastRes.json();
-    const cc = current.currentConditions;
+    const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const data = await res.json();
 
-    const forecastDays = (forecast.forecastDays || []).map((day: any) => ({
-      date: `${day.displayDate?.month}/${day.displayDate?.day}`,
-      high: Math.round(day.highTemperature?.degrees || 0),
-      low: Math.round(day.lowTemperature?.degrees || 0),
-      description: day.daytimeForecast?.weatherCondition?.description?.text || "",
-      rainMm: Math.round(day.precipitation?.qpf?.quantity || 0),
-      humidity: day.daytimeForecast?.relativeHumidity || 0,
+    const wmoDesc = (code: number): string => {
+      if (code === 0) return "Clear sky";
+      if (code <= 3) return "Partly cloudy";
+      if (code <= 49) return "Foggy";
+      if (code <= 67) return "Rainy";
+      if (code <= 77) return "Snowy";
+      if (code <= 82) return "Showers";
+      return "Thunderstorm";
+    };
+
+    const c = data.current;
+    const d = data.daily;
+
+    const forecastDays = (d.time as string[]).map((date: string, i: number) => ({
+      date,
+      high: Math.round(d.temperature_2m_max[i]),
+      low: Math.round(d.temperature_2m_min[i]),
+      description: wmoDesc(d.weathercode[i]),
+      rainMm: Math.round(d.precipitation_sum[i] || 0),
+      humidity: d.relative_humidity_2m_max[i] || 0,
     }));
 
     return {
-      temperature: Math.round(cc?.temperature?.degrees || 0),
-      humidity: cc?.relativeHumidity || 0,
-      description: cc?.weatherCondition?.description?.text || "",
-      rainMmPerDay: Math.round(cc?.precipitation?.qpf?.quantity || 0),
+      temperature: Math.round(c.temperature_2m),
+      humidity: c.relative_humidity_2m,
+      description: wmoDesc(c.weather_code),
+      rainMmPerDay: Math.round(c.precipitation || 0),
       forecast: forecastDays,
     };
   } catch (e) {
@@ -166,6 +178,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Hard timeout: abort if analysis takes >55s
+    const abort = new AbortController();
+    const timeout = setTimeout(() => abort.abort(), 55_000);
+
     const formData = await request.formData();
     const uid = formData.get("uid") as string;
     const imageUrl = formData.get("imageUrl") as string;
@@ -185,13 +201,21 @@ export async function POST(request: NextRequest) {
     const lon = lonStr ? parseFloat(lonStr) : null;
     const hasLocation = !!(lat !== null && lon !== null);
 
-    const [diagnosis, weather, location] = await Promise.all([
-      analyzeLeafImage(imageBase64, mimeType),
-      hasLocation ? getWeather(lat!, lon!) : Promise.resolve(null),
-      hasLocation ? reverseGeocode(lat!, lon!) : Promise.resolve(null),
-    ]);
+    let diagnosis: DiagnosisResult;
+    let weather: WeatherData | null = null;
+    let location: LocationData | null = null;
 
-    const treatmentPlan = await generateTreatmentPlan(diagnosis, weather, location);
+    try {
+      [diagnosis, weather, location] = await Promise.all([
+        analyzeLeafImage(imageBase64, mimeType),
+        hasLocation ? getWeather(lat!, lon!) : Promise.resolve(null),
+        hasLocation ? reverseGeocode(lat!, lon!) : Promise.resolve(null),
+      ]) as [DiagnosisResult, WeatherData | null, LocationData | null];
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    const treatmentPlan = await generateTreatmentPlan(diagnosis!, weather, location);
 
     const result: DiagnosisRecord = {
       uid: uid || "anonymous",

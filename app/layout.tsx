@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
-import { AuthProvider } from "@/components/auth-provider";
+import AuthProviderWrapper from "@/components/auth-provider-wrapper";
 import "./globals.css";
 
 const inter = Inter({
@@ -31,10 +31,10 @@ export default function RootLayout({
         />
       </head>
       <body className="min-h-full flex flex-col">
-        <AuthProvider>
+        <AuthProviderWrapper>
           {children}
           <Toaster richColors position="top-right" />
-        </AuthProvider>
+        </AuthProviderWrapper>
       </body>
     </html>
   );

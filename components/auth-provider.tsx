@@ -25,7 +25,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     // Listen for auth state changes
-    const unsubscribe = auth.onAuthStateChanged((user) => {
+    const unsubscribe = auth!.onAuthStateChanged((user) => {
       setUser(user);
       setLoading(false);
     });
@@ -36,7 +36,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const loginWithGoogle = async () => {
     try {
       const provider = new GoogleAuthProvider();
-      await signInWithPopup(auth, provider);
+      await signInWithPopup(auth!, provider);
       toast.success("Successfully logged in!");
     } catch (error: any) {
       console.error("Google login error:", error);
@@ -46,7 +46,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const logout = async () => {
     try {
-      await signOut(auth);
+      await signOut(auth!);
       toast.success("Successfully logged out");
     } catch (error: any) {
       console.error("Logout error:", error);
